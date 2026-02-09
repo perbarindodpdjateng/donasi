@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rekap Peserta Realtime</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    :root {
+      --clr-bg: transparent;
+      --clr-card: #ffffff;
+      --clr-line: #e5e7eb;
+      --clr-text: #111827;
+      --clr-subtle: #6b7280;
+      --clr-accent: #3b82f6;
+      --radius: 8px;
+      --shadow: 0 0px 6px rgba(0,0,0,.28);
+      --font-main: 11px;
+      --font-body: 10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--clr-bg);
+      color: var(--clr-text);
+      font-size: var(--font-main);
+      padding: 8px;
+    }
+
+    .card {
+      background: var(--clr-card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 10px;
+      max-width: 640px;
+      margin: auto;
+    }
+
+    /* ----- TOTAL DONASI ----- */
+    #totalDonasi {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--clr-accent);
+      margin-bottom: 8px;
+    }
+
+    .search-box {
+      position: relative;
+      margin-bottom: 8px;
+    }
+    .search-box input {
+      width: 100%;
+      font-size: var(--font-main);
+      padding: 6px 30px 6px 10px;
+      border: 1px solid var(--clr-line);
+      border-radius: var(--radius);
+      outline: none;
+    }
+    .search-box input:focus { border-color: var(--clr-accent); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--font-body);
+    }
+    th, td {
+      padding: 4px 5px;
+      border: 1px solid var(--clr-line);
+      line-height: 1.2;
+      vertical-align: top;
+    }
+    th {
+      background: #f9fafb;
+      font-weight: 500;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    th:nth-child(1), td:nth-child(1) { width: 14ch; max-width: 20ch; }
+    th:nth-child(2), td:nth-child(2) { text-transform: uppercase; }
+    th:nth-child(3), td:nth-child(3) { width: 10ch; max-width: 15ch; text-align: right; }
+    th:nth-child(4), td:nth-child(4) { width: 2ch; max-width: 2ch; }
+
+    tr.new-entry td { background: #e0ffe0; animation: fadeIn 1s ease-in; }
+    @keyframes fadeIn { from { background: #c4ffc4; } to { background: #e0ffe0; } }
+
+    .loading, .warning {
+      text-align: center;
+      margin-bottom: 6px;
+      font-size: var(--font-main);
+    }
+    .loading { color: var(--clr-subtle); }
+    .warning { color: #ef4444; }
+
+    .pagination{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:6px;
+      font-size:var(--font-body);
+    }
+    .pagination button{
+      padding:4px 8px;
+      border:1px solid var(--clr-line);
+      background:#fff;
+      border-radius:var(--radius);
+      cursor:pointer;
+    }
+    .pagination button:disabled{
+      opacity:.5;
+      cursor:not-allowed;
+    }
+
+    @media (max-width: 360px) {
+      :root { --font-main: 10px; --font-body: 9px; }
+      th, td { padding: 3px 4px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <p id="loading" class="loading">Memuat data...</p>
+
+    <!-- TOTAL DONASI -->
+    <div id="totalDonasi">Total Donasi: Rp&nbsp;0</div>
+
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Cari Donatur / Donasi"/>
+    </div>
+
+    <table id="dataTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const rowsPerPage = 15;
+    let currentPage   = 1;
+    let previousData  = '';
+    let lastRendered  = [];
+    let originalData  = [];
+
+    function formatDateTime(str) {
+      if (!str || typeof str !== 'string') return str;
+      const d = new Date(str);
+      if (isNaN(d.getTime())) return str;
+      const pad = n => String(n).padStart(2, '0');
+      return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function isDateString(str) {
+      return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(str);
+    }
+
+    /* format ribuan saja */
+    function formatRibuan(raw) {
+      if (isNaN(raw) || raw === '') return raw;
+      return Number(raw).toLocaleString('id-ID');
+    }
+
+    /* hitung total seluruh donasi (kolom ke-3, baris data) */
+    function hitungTotalDonasi() {
+      if (!originalData.length) return 0;
+      return originalData.slice(1).reduce((sum, row) => {
+        const val = Number(row[2]);
+        return sum + (isNaN(val) ? 0 : val);
+      }, 0);
+    }
+
+    /* tampilkan total di elemen */
+    function tampilkanTotal() {
+      const el = document.getElementById('totalDonasi');
+      el.textContent = 'Total Donasi: Rp ' + formatRibuan(hitungTotalDonasi());
+    }
+
+    async function fetchData() {
+      try {
+        const response = await fetch('https://script.google.com/macros/s/AKfycbwoIegzbr2-8H1cJTkhSvN8oGXF5neGzGgcAP6npSPyd2-9bY7vYCmukaQMGLW0ur28/exec', {
+          cache: 'no-store'
+        });
+        const data = await response.json();
+        const dataString = JSON.stringify(data);
+
+        if (dataString !== previousData) {
+          previousData = dataString;
+          originalData = data;
+          currentPage  = 1;
+          tampilkanTotal();   // <-- update total
+          renderTable();
+        }
+        document.getElementById("loading").style.display = "none";
+      } catch (error) {
+        console.error("Fetch error:", error);
+        document.getElementById("loading").textContent = "Gagal memuat data.";
+      }
+    }
+
+    function renderTable() {
+      const search = document.getElementById("searchInput").value.toLowerCase();
+      let filtered = originalData.filter((row, idx) => {
+        if (idx === 0) return true;
+        return row.join(" ").toLowerCase().includes(search);
+      });
+
+      const header   = filtered[0];
+      const bodyRows = filtered.slice(1);
+      const totalPg  = Math.max(1, Math.ceil(bodyRows.length / rowsPerPage));
+
+      if (currentPage > totalPg) currentPage = totalPg;
+
+      const start    = (currentPage - 1) * rowsPerPage;
+      const end      = start + rowsPerPage;
+      const pageRows = [header, ...bodyRows.slice(start, end)];
+
+      renderTablePage(pageRows);
+      renderPagination(totalPg);
+    }
+
+    function renderTablePage(pageRows) {
+      const thead = document.querySelector("#dataTable thead");
+      const tbody = document.querySelector("#dataTable tbody");
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+
+      pageRows.forEach((row, index) => {
+        const tr = document.createElement("tr");
+
+        if (index !== 0) {
+          const isNew = !lastRendered.includes(JSON.stringify(row));
+          if (isNew) {
+            tr.classList.add("new-entry");
+            lastRendered.push(JSON.stringify(row));
+          }
+        }
+
+        row.forEach((cell, colIndex) => {
+          const el = document.createElement(index === 0 ? "th" : "td");
+
+          if (index !== 0 && colIndex === 2) {
+            el.textContent = formatRibuan(cell);
+          } else if (index !== 0 && isDateString(cell)) {
+            el.textContent = formatDateTime(cell);
+          } else {
+            el.textContent = cell;
+          }
+          tr.appendChild(el);
+        });
+
+        index === 0 ? thead.appendChild(tr) : tbody.appendChild(tr);
+      });
+    }
+
+    function renderPagination(totalPages) {
+      let wrap = document.getElementById("paginationWrap");
+      if (!wrap) {
+        wrap = document.createElement("div");
+        wrap.id = "paginationWrap";
+        wrap.className = "pagination";
+        document.querySelector(".card").appendChild(wrap);
+      }
+
+      wrap.innerHTML = `
+        <button id="prevBtn">Previous</button>
+        <span>Hal ${currentPage} / ${totalPages}</span>
+        <button id="nextBtn">Next</button>
+      `;
+
+      const prev = document.getElementById("prevBtn");
+      const next = document.getElementById("nextBtn");
+
+      prev.disabled = currentPage === 1;
+      next.disabled = currentPage === totalPages;
+
+      prev.onclick = () => { currentPage--; renderTable(); };
+      next.onclick = () => { currentPage++; renderTable(); };
+    }
+
+    document.getElementById("searchInput").addEventListener("input", () => {
+      currentPage = 1;
+      renderTable();
+    });
+
+    fetchData();
+    setInterval(fetchData, 5000);
+  </script>
+</body>
+</html>
